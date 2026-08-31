@@ -128,3 +128,120 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
 pub fn from_env() -> Result<TelemetryConfig, TelemetryError> {
     TelemetryConfig::from_env()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{LogFormat, TelemetryConfig};
+    use crate::error::TelemetryError;
+
+    // ---- LogFormat tests ----
+
+    #[test]
+    fn log_format_variants() {
+        let text = LogFormat::Text;
+        let json = LogFormat::Json;
+        assert_ne!(text, json);
+    }
+
+    #[test]
+    fn log_format_equality() {
+        assert_eq!(LogFormat::Text, LogFormat::Text);
+        assert_eq!(LogFormat::Json, LogFormat::Json);
+    }
+
+    #[test]
+    fn log_format_from_str_text() {
+        assert_eq!(LogFormat::from_str_opt("text"), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_opt("TEXT"), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_opt("plain"), LogFormat::Text);
+    }
+
+    #[test]
+    fn log_format_from_str_json_default() {
+        assert_eq!(LogFormat::from_str_opt("json"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_opt("anything"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_opt(""), LogFormat::Json);
+    }
+
+    // ---- TelemetryConfig defaults tests ----
+
+    #[test]
+    fn telemetry_config_default() {
+        let cfg = TelemetryConfig::default();
+        assert_eq!(cfg.service_name, "unknown");
+        assert_eq!(cfg.service_version, "0.0.0");
+        assert_eq!(cfg.log_level, "info");
+        assert_eq!(cfg.log_format, LogFormat::Json);
+        assert!(cfg.otlp_endpoint.is_none());
+        assert!(cfg.sentry_dsn.is_none());
+        assert_eq!(cfg.sample_rate, 1.0);
+    }
+
+    #[test]
+    fn telemetry_config_builder() {
+        let cfg = TelemetryConfig::default()
+            .service_name("my-svc")
+            .service_version("1.2.3")
+            .log_level("debug")
+            .log_format(LogFormat::Text)
+            .otlp_endpoint("http://localhost:4317")
+            .sentry_dsn("https://key@sentry.io/1")
+            .sample_rate(0.5);
+
+        assert_eq!(cfg.service_name, "my-svc");
+        assert_eq!(cfg.service_version, "1.2.3");
+        assert_eq!(cfg.log_level, "debug");
+        assert_eq!(cfg.log_format, LogFormat::Text);
+        assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://localhost:4317"));
+        assert_eq!(cfg.sentry_dsn.as_deref(), Some("https://key@sentry.io/1"));
+        assert_eq!(cfg.sample_rate, 0.5);
+    }
+
+    #[test]
+    fn sample_rate_clamped() {
+        let cfg = TelemetryConfig::default().sample_rate(2.0);
+        assert_eq!(cfg.sample_rate, 1.0);
+
+        let cfg = TelemetryConfig::default().sample_rate(-0.5);
+        assert_eq!(cfg.sample_rate, 0.0);
+    }
+
+    // ---- TelemetryError display tests ----
+
+    #[test]
+    fn error_otlp_connection_display() {
+        let err = TelemetryError::OtlpConnection("refused".into());
+        assert_eq!(err.to_string(), "OTLP connection error: refused");
+    }
+
+    #[test]
+    fn error_invalid_config_display() {
+        let err = TelemetryError::InvalidConfig("bad value".into());
+        assert_eq!(err.to_string(), "invalid config: bad value");
+    }
+
+    // ---- from_env defaults (no env vars set) ----
+
+    #[test]
+    fn from_env_defaults() {
+        let cfg = TelemetryConfig::from_env().unwrap();
+        assert_eq!(cfg.service_name, "unknown");
+        assert_eq!(cfg.service_version, "0.0.0");
+        assert_eq!(cfg.log_level, "info");
+        assert_eq!(cfg.log_format, LogFormat::Json);
+        assert!(cfg.otlp_endpoint.is_none());
+        assert!(cfg.sentry_dsn.is_none());
+        assert_eq!(cfg.sample_rate, 1.0);
+    }
+
+    // ---- LogFormat Debug / Clone ----
+
+    #[test]
+    fn log_format_debug_and_clone() {
+        let fmt = LogFormat::Text;
+        let cloned = fmt;
+        let debug_str = format!("{:?}", fmt);
+        assert_eq!(debug_str, "Text");
+        assert_eq!(fmt, cloned);
+    }
+}
