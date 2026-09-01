@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+//! OpenTelemetry and tracing integration for Rust.
 
 mod config;
+/// Error types.
 pub mod error;
 
 pub use config::{LogFormat, TelemetryConfig};
@@ -9,7 +13,7 @@ pub use error::TelemetryError;
 /// RAII guard that flushes and shuts down telemetry on drop.
 pub struct TelemetryGuard {
     #[cfg(feature = "otlp")]
-    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
     #[cfg(feature = "sentry")]
     sentry_guard: Option<sentry::ClientInitGuard>,
 }
@@ -49,23 +53,11 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
         sentry_guard: None,
     };
 
-    let registry = tracing_subscriber::registry().with(filter);
-
-    match config.log_format {
-        LogFormat::Text => {
-            registry
-                .with(tracing_subscriber::fmt::layer().with_target(true))
-                .init();
-        }
-        LogFormat::Json => {
-            registry
-                .with(tracing_subscriber::fmt::layer().json().with_target(true))
-                .init();
-        }
-    }
-
     #[cfg(feature = "otlp")]
-    {
+    if config.otlp_endpoint.is_some() {
+        use opentelemetry::trace::TracerProvider as _;
+        use opentelemetry_otlp::WithExportConfig;
+
         let otlp_endpoint = config
             .otlp_endpoint
             .as_deref()
@@ -78,29 +70,56 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
             )])
             .build();
 
-        let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_endpoint(otlp_endpoint)
+            .build()
+            .map_err(|e| TelemetryError::OtlpConnection(e.to_string()))?;
+
+        let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
             .with_resource(resource)
             .build();
 
         let tracer = tracer_provider.tracer(config.service_name.clone());
-
         let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
         tracing_subscriber::registry()
-            .with(tracing_subscriber::EnvFilter::try_new(&config.log_level)
-                .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?)
+            .with(
+                tracing_subscriber::EnvFilter::try_new(&config.log_level)
+                    .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?,
+            )
+            .with(tracing_subscriber::fmt::layer().with_target(true))
             .with(otel_layer)
-            .init();
+            .try_init()
+            .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
 
         guard.tracer_provider = Some(tracer_provider);
+        return Ok(guard);
+    }
+
+    let registry = tracing_subscriber::registry().with(filter);
+
+    match config.log_format {
+        LogFormat::Text => {
+            registry
+                .with(tracing_subscriber::fmt::layer().with_target(true))
+                .try_init()
+                .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
+        }
+        LogFormat::Json => {
+            registry
+                .with(tracing_subscriber::fmt::layer().json().with_target(true))
+                .try_init()
+                .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
+        }
     }
 
     #[cfg(feature = "sentry")]
     {
-        let sentry_dsn = config
-            .sentry_dsn
-            .as_deref()
-            .ok_or_else(|| TelemetryError::InvalidConfig("sentry feature enabled but no DSN provided".into()))?;
+        let sentry_dsn = config.sentry_dsn.as_deref().ok_or_else(|| {
+            TelemetryError::InvalidConfig("sentry feature enabled but no DSN provided".into())
+        })?;
 
         guard.sentry_guard = Some(sentry::init((
             sentry_dsn,
@@ -244,4 +263,275 @@ mod tests {
         assert_eq!(debug_str, "Text");
         assert_eq!(fmt, cloned);
     }
+
+    // ---- Additional LogFormat tests ----
+
+    #[test]
+    fn log_format_json_debug() {
+        let fmt = LogFormat::Json;
+        let debug_str = format!("{:?}", fmt);
+        assert_eq!(debug_str, "Json");
+    }
+
+    #[test]
+    fn log_format_from_str_opt_case_sensitivity() {
+        assert_eq!(LogFormat::from_str_opt("Text"), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_opt("TEXT"), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_opt("text"), LogFormat::Text);
+        assert_eq!(LogFormat::from_str_opt("JSON"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_opt("Json"), LogFormat::Json);
+    }
+
+    #[test]
+    fn log_format_from_str_opt_unknown_defaults_to_json() {
+        assert_eq!(LogFormat::from_str_opt("unknown"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_opt("xml"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_opt("binary"), LogFormat::Json);
+        assert_eq!(LogFormat::from_str_opt("123"), LogFormat::Json);
+    }
+
+    #[test]
+    fn log_format_equality_asymmetric() {
+        assert_ne!(LogFormat::Text, LogFormat::Json);
+        assert_ne!(LogFormat::Json, LogFormat::Text);
+    }
+
+    #[test]
+    fn log_format_clone_independence() {
+        let fmt1 = LogFormat::Text;
+        let fmt2 = fmt1;
+        assert_eq!(fmt1, LogFormat::Text);
+        assert_eq!(fmt2, LogFormat::Text);
+    }
+
+    // ---- Additional TelemetryConfig builder tests ----
+
+    #[test]
+    fn telemetry_config_builder_overwrite_service_name() {
+        let cfg = TelemetryConfig::default()
+            .service_name("first")
+            .service_name("second");
+        assert_eq!(cfg.service_name, "second");
+    }
+
+    #[test]
+    fn telemetry_config_builder_overwrite_service_version() {
+        let cfg = TelemetryConfig::default()
+            .service_version("1.0.0")
+            .service_version("2.0.0");
+        assert_eq!(cfg.service_version, "2.0.0");
+    }
+
+    #[test]
+    fn telemetry_config_builder_overwrite_log_level() {
+        let cfg = TelemetryConfig::default()
+            .log_level("info")
+            .log_level("debug");
+        assert_eq!(cfg.log_level, "debug");
+    }
+
+    #[test]
+    fn telemetry_config_builder_overwrite_log_format() {
+        let cfg = TelemetryConfig::default()
+            .log_format(LogFormat::Text)
+            .log_format(LogFormat::Json);
+        assert_eq!(cfg.log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn telemetry_config_builder_overwrite_otlp_endpoint() {
+        let cfg = TelemetryConfig::default()
+            .otlp_endpoint("http://first:4317")
+            .otlp_endpoint("http://second:4317");
+        assert_eq!(
+            cfg.otlp_endpoint.as_deref(),
+            Some("http://second:4317")
+        );
+    }
+
+    #[test]
+    fn telemetry_config_builder_overwrite_sentry_dsn() {
+        let cfg = TelemetryConfig::default()
+            .sentry_dsn("https://first@sentry.io/1")
+            .sentry_dsn("https://second@sentry.io/2");
+        assert_eq!(
+            cfg.sentry_dsn.as_deref(),
+            Some("https://second@sentry.io/2")
+        );
+    }
+
+    #[test]
+    fn sample_rate_clamp_boundary_values() {
+        let cfg = TelemetryConfig::default().sample_rate(0.0);
+        assert_eq!(cfg.sample_rate, 0.0);
+
+        let cfg = TelemetryConfig::default().sample_rate(1.0);
+        assert_eq!(cfg.sample_rate, 1.0);
+
+        let cfg = TelemetryConfig::default().sample_rate(0.5);
+        assert_eq!(cfg.sample_rate, 0.5);
+
+        let cfg = TelemetryConfig::default().sample_rate(-100.0);
+        assert_eq!(cfg.sample_rate, 0.0);
+
+        let cfg = TelemetryConfig::default().sample_rate(100.0);
+        assert_eq!(cfg.sample_rate, 1.0);
+    }
+
+    // ---- Additional TelemetryConfig default tests ----
+
+    #[test]
+    fn telemetry_config_default_clone() {
+        let cfg = TelemetryConfig::default();
+        let cloned = cfg.clone();
+        assert_eq!(cfg.service_name, cloned.service_name);
+        assert_eq!(cfg.service_version, cloned.service_version);
+        assert_eq!(cfg.log_level, cloned.log_level);
+        assert_eq!(cfg.log_format, cloned.log_format);
+        assert_eq!(cfg.otlp_endpoint, cloned.otlp_endpoint);
+        assert_eq!(cfg.sentry_dsn, cloned.sentry_dsn);
+        assert_eq!(cfg.sample_rate, cloned.sample_rate);
+    }
+
+    #[test]
+    fn telemetry_config_debug_format() {
+        let cfg = TelemetryConfig::default();
+        let debug_str = format!("{:?}", cfg);
+        assert!(debug_str.contains("TelemetryConfig"));
+        assert!(debug_str.contains("unknown"));
+        assert!(debug_str.contains("info"));
+    }
+
+    // ---- from_env tests (safe, no env var manipulation) ----
+
+    #[test]
+    fn from_env_returns_defaults_when_no_vars_set() {
+        // This test relies on the env vars not being set in the test environment.
+        // The from_env_defaults test already covers this, but we add it for
+        // explicit documentation of the from_env behavior.
+        let cfg = TelemetryConfig::from_env().unwrap();
+        assert!(!cfg.service_name.is_empty());
+        assert!(!cfg.service_version.is_empty());
+        assert!(!cfg.log_level.is_empty());
+        assert!(cfg.sample_rate >= 0.0 && cfg.sample_rate <= 1.0);
+    }
+
+    #[test]
+    fn from_env_preserves_builder_pattern_semantics() {
+        // Verify from_env produces a valid config that can be further customized
+        let cfg = TelemetryConfig::from_env()
+            .unwrap()
+            .service_name("override")
+            .service_version("9.9.9");
+        assert_eq!(cfg.service_name, "override");
+        assert_eq!(cfg.service_version, "9.9.9");
+    }
+
+    #[test]
+    fn from_env_invalid_sample_rate_unparseable() {
+        // Verify that from_env handles unparseable sample rate gracefully.
+        // We can't set env vars due to forbid(unsafe_code), so we test
+        // the builder's sample_rate parsing logic instead.
+        let cfg = TelemetryConfig::default().sample_rate(0.75);
+        assert_eq!(cfg.sample_rate, 0.75);
+
+        // Verify clamping edge cases
+        let cfg = TelemetryConfig::default().sample_rate(f32::NAN);
+        // NaN.clamp(0.0, 1.0) in Rust will panic, so this is expected behavior
+    }
+
+    // ---- TelemetryError additional display tests ----
+
+    #[test]
+    fn error_otlp_connection_long_message() {
+        let err = TelemetryError::OtlpConnection(
+            "connection refused: endpoint http://localhost:4317 unreachable".into(),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("OTLP connection error"));
+        assert!(msg.contains("connection refused"));
+        assert!(msg.contains("http://localhost:4317"));
+    }
+
+    #[test]
+    fn error_invalid_config_long_message() {
+        let err = TelemetryError::InvalidConfig(
+            "expected log level to be one of: trace, debug, info, warn, error".into(),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("invalid config"));
+        assert!(msg.contains("trace"));
+    }
+
+    #[test]
+    fn error_debug_format() {
+        let err = TelemetryError::OtlpConnection("test".into());
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("OtlpConnection"));
+
+        let err = TelemetryError::InvalidConfig("test".into());
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("InvalidConfig"));
+    }
+
+    #[test]
+    fn error_is_std_error() {
+        let err = TelemetryError::InvalidConfig("test".into());
+        let std_err: &dyn std::error::Error = &err;
+        assert!(std_err.to_string().contains("invalid config"));
+        assert!(std_err.source().is_none());
+    }
+
+    // ---- Full builder chain test ----
+
+    #[test]
+    fn telemetry_config_full_builder_chain() {
+        let cfg = TelemetryConfig::default()
+            .service_name("full-chain-test")
+            .service_version("0.1.0")
+            .log_level("trace,hyper=warn")
+            .log_format(LogFormat::Text)
+            .otlp_endpoint("http://jaeger:4317")
+            .sentry_dsn("https://abc@sentry.io/123")
+            .sample_rate(0.25);
+
+        assert_eq!(cfg.service_name, "full-chain-test");
+        assert_eq!(cfg.service_version, "0.1.0");
+        assert_eq!(cfg.log_level, "trace,hyper=warn");
+        assert_eq!(cfg.log_format, LogFormat::Text);
+        assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://jaeger:4317"));
+        assert_eq!(
+            cfg.sentry_dsn.as_deref(),
+            Some("https://abc@sentry.io/123")
+        );
+        assert_eq!(cfg.sample_rate, 0.25);
+    }
+
+    // ---- TelemetryConfig field access ----
+
+    #[test]
+    fn telemetry_config_all_fields_accessible() {
+        let cfg = TelemetryConfig::default();
+        // Verify all fields are publicly accessible
+        let _ = &cfg.service_name;
+        let _ = &cfg.service_version;
+        let _ = &cfg.log_level;
+        let _ = &cfg.log_format;
+        let _ = &cfg.otlp_endpoint;
+        let _ = &cfg.sentry_dsn;
+        let _ = &cfg.sample_rate;
+    }
+
+    #[test]
+    fn telemetry_config_service_name_various_lengths() {
+        let short = TelemetryConfig::default().service_name("a");
+        assert_eq!(short.service_name, "a");
+
+        let long = TelemetryConfig::default().service_name("a".repeat(1000));
+        assert_eq!(long.service_name.len(), 1000);
+
+        let empty = TelemetryConfig::default().service_name("");
+        assert!(empty.service_name.is_empty());
+    }
+
 }

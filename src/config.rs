@@ -57,7 +57,8 @@ impl TelemetryConfig {
     pub fn from_env() -> Result<Self, TelemetryError> {
         Ok(Self {
             service_name: std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "unknown".into()),
-            service_version: std::env::var("OTEL_SERVICE_VERSION").unwrap_or_else(|_| "0.0.0".into()),
+            service_version: std::env::var("OTEL_SERVICE_VERSION")
+                .unwrap_or_else(|_| "0.0.0".into()),
             log_level: std::env::var("OTEL_LOG_LEVEL").unwrap_or_else(|_| "info".into()),
             log_format: LogFormat::from_str_opt(
                 &std::env::var("OTEL_LOG_FORMAT").unwrap_or_else(|_| "json".into()),
