@@ -343,10 +343,7 @@ mod tests {
         let cfg = TelemetryConfig::default()
             .otlp_endpoint("http://first:4317")
             .otlp_endpoint("http://second:4317");
-        assert_eq!(
-            cfg.otlp_endpoint.as_deref(),
-            Some("http://second:4317")
-        );
+        assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://second:4317"));
     }
 
     #[test]
@@ -500,10 +497,7 @@ mod tests {
         assert_eq!(cfg.log_level, "trace,hyper=warn");
         assert_eq!(cfg.log_format, LogFormat::Text);
         assert_eq!(cfg.otlp_endpoint.as_deref(), Some("http://jaeger:4317"));
-        assert_eq!(
-            cfg.sentry_dsn.as_deref(),
-            Some("https://abc@sentry.io/123")
-        );
+        assert_eq!(cfg.sentry_dsn.as_deref(), Some("https://abc@sentry.io/123"));
         assert_eq!(cfg.sample_rate, 0.25);
     }
 
@@ -533,5 +527,4 @@ mod tests {
         let empty = TelemetryConfig::default().service_name("");
         assert!(empty.service_name.is_empty());
     }
-
 }
