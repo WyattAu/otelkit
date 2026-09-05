@@ -17,7 +17,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "regis
 tracing-opentelemetry = { version = "0.29", optional = true }
 
 [dependencies.opentelemetry]
-version = "0.28"
+version = "0.32"
 optional = true
 
 [dependencies.opentelemetry_sdk]
