@@ -26,10 +26,10 @@ impl Drop for TelemetryGuard {
         }
         #[cfg(feature = "otlp")]
         {
-            if let Some(provider) = self.tracer_provider.take() {
-                if let Err(e) = provider.shutdown() {
-                    eprintln!("otelkit: tracer provider shutdown error: {e}");
-                }
+            if let Some(provider) = self.tracer_provider.take()
+                && let Err(e) = provider.shutdown()
+            {
+                eprintln!("otelkit: tracer provider shutdown error: {e}");
             }
         }
     }
