@@ -41,3 +41,9 @@ sentry = ["dep:sentry"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+indexing_slicing = "deny"
+panic = "deny"

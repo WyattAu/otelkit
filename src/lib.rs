@@ -148,6 +148,15 @@ pub fn from_env() -> Result<TelemetryConfig, TelemetryError> {
     TelemetryConfig::from_env()
 }
 
+// Tests exercise failure paths and invariants directly; unwrap/expect,
+// slicing, and panicking asserts are acceptable here — violations
+// surface as test failures, not production panics.
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 #[cfg(test)]
 mod tests {
     use crate::config::{LogFormat, TelemetryConfig};
@@ -432,9 +441,9 @@ mod tests {
         let cfg = TelemetryConfig::default().sample_rate(0.75);
         assert_eq!(cfg.sample_rate, 0.75);
 
-        // Verify clamping edge cases
-        let cfg = TelemetryConfig::default().sample_rate(f32::NAN);
-        // NaN.clamp(0.0, 1.0) in Rust will panic, so this is expected behavior
+        // Verify clamping edge cases (NaN would panic inside f32::clamp,
+        // so the value is only built, not asserted on).
+        let _cfg = TelemetryConfig::default().sample_rate(f32::NAN);
     }
 
     // ---- TelemetryError additional display tests ----
