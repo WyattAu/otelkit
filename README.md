@@ -78,3 +78,7 @@ Rust **1.85** (edition 2024).
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.
+
+## Security
+
+Threat model: [THREAT-MODEL.md](THREAT-MODEL.md).
