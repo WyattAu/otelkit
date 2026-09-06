@@ -1,4 +1,7 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.otelkit]]
+who = "WyattAu <wyatt_au@protonmail.com>"
+criteria = "safe-to-deploy"
+version = "1.0.0"
