@@ -162,6 +162,25 @@ mod tests {
     use crate::config::{LogFormat, TelemetryConfig};
     use crate::error::TelemetryError;
 
+    #[cfg(feature = "otlp")]
+    #[test]
+    fn guard_drop_reports_provider_shutdown_error() {
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+
+        // A provider that has already been shut down fails the guard's
+        // shutdown call (AlreadyShutdown), exercising the error branch of
+        // `Drop for TelemetryGuard`.
+        let provider = SdkTracerProvider::builder().build();
+        assert!(provider.shutdown().is_ok());
+
+        let guard = crate::TelemetryGuard {
+            tracer_provider: Some(provider),
+            #[cfg(feature = "sentry")]
+            sentry_guard: None,
+        };
+        drop(guard);
+    }
+
     // ---- LogFormat tests ----
 
     #[test]
