@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. Format: [Keep a
 Changelog](https://keepachangelog.com/) — versions follow [semver](https://semver.org).
 
+## [2.0.1] - 2026-09-09
+
+### Tests
+
+- Raised coverage from 83.9% to 97.1% (regions, `--all-features`): tests for
+  the stdout and Prometheus exporter init paths, `TelemetryGuard::gather_metrics()`,
+  guard-drop shutdown error branches, and backend dispatch via `init()`.
+
 ## [2.0.0] - 2026-09-08
 
 ### Added

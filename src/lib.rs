@@ -365,6 +365,53 @@ mod tests {
         drop(guard);
     }
 
+    #[cfg(feature = "stdout")]
+    #[test]
+    fn guard_drop_reports_stdout_provider_shutdown_error() {
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+
+        // A provider that has already been shut down fails the guard's
+        // stdout shutdown call (AlreadyShutdown), exercising the error
+        // branch of `Drop for TelemetryGuard`.
+        let provider = SdkTracerProvider::builder().build();
+        assert!(provider.shutdown().is_ok());
+
+        let guard = crate::TelemetryGuard {
+            #[cfg(feature = "otlp")]
+            tracer_provider: None,
+            stdout_provider: Some(provider),
+            #[cfg(feature = "prometheus")]
+            meter_provider: None,
+            #[cfg(feature = "prometheus")]
+            prometheus_registry: None,
+            #[cfg(feature = "sentry")]
+            sentry_guard: None,
+        };
+        drop(guard);
+    }
+
+    #[cfg(feature = "prometheus")]
+    #[test]
+    fn guard_drop_reports_meter_provider_shutdown_error() {
+        use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+        // Same AlreadyShutdown pattern for the metrics side.
+        let provider = SdkMeterProvider::builder().build();
+        assert!(provider.shutdown().is_ok());
+
+        let guard = crate::TelemetryGuard {
+            #[cfg(feature = "otlp")]
+            tracer_provider: None,
+            #[cfg(feature = "stdout")]
+            stdout_provider: None,
+            meter_provider: Some(provider),
+            prometheus_registry: None,
+            #[cfg(feature = "sentry")]
+            sentry_guard: None,
+        };
+        drop(guard);
+    }
+
     // ---- LogFormat tests ----
 
     #[test]

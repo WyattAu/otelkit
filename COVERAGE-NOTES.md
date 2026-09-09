@@ -6,29 +6,45 @@
 cargo llvm-cov --summary-only --all-features
 ```
 
-Final: **99.76%** line coverage (1/354 missed). Tests added in this pass:
+Current: **97.06% region / 98.43% line coverage**. All exporter backends
+(OTLP, Stdout, Prometheus) and their lifecycle paths are exercised. Tests
+added to close the gap:
 
-- `src/lib.rs` — `guard_drop_reports_provider_shutdown_error`: dropping a
-  `TelemetryGuard` holding an already-shut-down `SdkTracerProvider` exercises the
-  `Drop` error branch (opentelemetry-sdk 0.28 returns `AlreadyShutdown` on the
-  second `shutdown()`).
-- `tests/init_otlp_errors.rs` — malformed OTLP endpoint maps to
-  `OtlpConnection`; a second `init` in one process fails `try_init` and maps to
-  `InvalidConfig`.
-- `tests/init_json_errors.rs` — same rebind-refusal path for the JSON-format
-  branch.
-- `tests/init_sentry_errors.rs` — with the `sentry` feature compiled in, a
-  config with neither an OTLP endpoint nor a DSN fails the DSN requirement.
+- `tests/init_stdout.rs` — stdout backend init, span export, guard-drop
+  shutdown, and the invalid-log-level error path (`EnvFilter::try_new`
+  rejects `info=bogus` before any global state is touched).
+- `tests/init_prometheus.rs` — prometheus backend init (JSON log format),
+  counter recorded through the globally installed meter provider, successful
+  `TelemetryGuard::gather_metrics()`, guard-drop shutdown, and the
+  invalid-log-level error path.
+- `tests/init_prometheus_text.rs` — prometheus backend with the Text log
+  format arm (each global subscriber init needs its own process, so the
+  format arms live in separate files).
+- `src/lib.rs` — `guard_drop_reports_stdout_provider_shutdown_error` and
+  `guard_drop_reports_meter_provider_shutdown_error`: dropping a
+  `TelemetryGuard` holding an already-shut-down provider (opentelemetry-sdk
+  returns `AlreadyShutdown` on the second `shutdown()`) exercises the stdout
+  and meter error branches of `Drop for TelemetryGuard`.
 
 Integration tests are kept in separate files on purpose: tracing allows one
 successful global subscriber per process, and each scenario needs the global
-state to itself.
+state to itself. Error-path tests must fail *before* any global state is
+touched (`EnvFilter::try_new` rejection) so they are safe under parallel
+execution. Note that free-form junk like `"not a level!!!"` parses as a
+target directive and does NOT fail; a directive with an invalid level such
+as `info=bogus` does.
 
-## Known exception: `src/lib.rs` line 90 (1 line)
+## Known unreachable defensive code
 
-Line 90 re-validates `EnvFilter::try_new(&config.log_level)` inside the OTLP
-branch. The identical call at line 46 already rejects any invalid level string
-before the OTLP branch is reachable, so line 90's `map_err` arm is
-**provably unreachable** defensive code. It is kept deliberately: removing it
-would couple the branch's correctness to the earlier validation surviving
-refactors. If it is ever removed, the earlier check must be audited first.
+Several `map_err` closure regions remain uncovered by design:
+
+- `init()`'s OTLP branch re-validates `EnvFilter::try_new` (the identical
+  call earlier in the function already rejects any invalid level string, so
+  the inner `map_err` arm is provably unreachable). It is kept deliberately:
+  removing it would couple the branch's correctness to the earlier
+  validation surviving refactors.
+- `gather_metrics()`'s `encode` and `from_utf8` error arms cannot fail with
+  the Prometheus text encoder's own output.
+- The exporter-build `map_err` in `init_prometheus` only fires if the
+  prometheus exporter constructor fails, which the registry/reader setup
+  does not.
