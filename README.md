@@ -1,5 +1,9 @@
 # otelkit
 
+[![docs.rs](https://docs.rs/otelkit/badge.svg)](https://docs.rs/otelkit)
+[![crates.io](https://img.shields.io/crates/v/otelkit.svg)](https://crates.io/crates/otelkit)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+
 Tracing and telemetry initialization for Rust — OpenTelemetry, OTLP export, Sentry integration, and structured logging.
 
 ## Purpose
@@ -53,11 +57,14 @@ let config = TelemetryConfig::default()
 
 ## Features
 
-- `default` — `["std", "json"]`
-- `std` — `tracing-subscriber/std`
-- `json` — `tracing-subscriber/json`
-- `otlp` — OpenTelemetry OTLP trace export
-- `sentry` — Sentry error tracking integration
+| Feature | Default | Description |
+|---|---|---|
+| `std` | ✅ | `tracing-subscriber/std` support. |
+| `json` | ✅ | JSON log output via `tracing-subscriber/json`. |
+| `otlp` | — | OpenTelemetry OTLP trace export to any OTLP-compatible collector. |
+| `stdout` | — | Stdout span exporter — hermetic, no network access needed. |
+| `prometheus` | — | In-process Prometheus metrics exposition via `TelemetryGuard::gather_metrics`. |
+| `sentry` | — | Sentry error tracking integration with release association and sample-rate control. |
 
 ## Environment Variables
 
@@ -73,7 +80,7 @@ let config = TelemetryConfig::default()
 
 ## MSRV
 
-Rust **1.85** (edition 2024).
+Rust **1.88** (edition 2024).
 
 ## License
 

@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
@@ -67,6 +69,7 @@ impl TelemetryGuard {
     /// the guard was created from a config selecting
     /// [`Exporter::Prometheus`]; returns an empty exposition otherwise.
     #[cfg(feature = "prometheus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "prometheus")))]
     pub fn gather_metrics(&self) -> Result<String, TelemetryError> {
         use prometheus::Encoder as _;
 
