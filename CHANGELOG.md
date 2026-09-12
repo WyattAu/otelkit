@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. Format: [Keep a
 Changelog](https://keepachangelog.com/) — versions follow [semver](https://semver.org).
 
+## [2.0.2] - 2026-09-12
+
+### Added
+
+- Wire integration suites proving the full export paths at the HTTP
+  boundary (each binary owns the process-global tracing/sentry state):
+  - `tests/wire_otlp.rs` — a real span exported as OTLP/protobuf
+    (HTTP) to a local receiver; asserts method, path, content type, and
+    the protobuf field tag of the payload.
+  - `tests/wire_prometheus.rs` — real metrics recorded through the global
+    meter, gathered via `TelemetryGuard::gather_metrics()`, then served
+    over a TCP listener and scraped back over the socket (counter,
+    histogram, label dimensions, resource attributes).
+  - `tests/wire_sentry.rs` — an event captured through the real Sentry
+    transport otelkit initializes, delivered as an envelope to a local
+    collector (wiremock); asserts the `x-sentry-auth` SDK metadata, the
+    envelope event id, and the captured payload.
+
+### CI
+
+- New `integration` job running the three wire suites with their
+  respective features.
+
 ## [2.0.1] - 2026-09-09
 
 ### Tests

@@ -13,3 +13,21 @@ jobs:
       loom: false
       wasm: false
       miri: false
+
+  # Wire tests: each binary owns the process-global tracing/sentry state
+  # and proves the full export path at the HTTP boundary — OTLP/protobuf
+  # to a local receiver, Prometheus exposition served + scraped over a
+  # socket, Sentry envelopes to a local collector (wiremock).
+  integration:
+    name: Integration (otlp / prometheus / sentry wire)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: OTLP export (local receiver)
+        run: cargo test --features otlp --test wire_otlp
+      - name: Prometheus gather + scrape (local TCP)
+        run: cargo test --features prometheus --test wire_prometheus
+      - name: Sentry envelope delivery (local collector)
+        run: cargo test --features sentry --test wire_sentry

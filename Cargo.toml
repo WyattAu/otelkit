@@ -1,6 +1,6 @@
 [package]
 name = "otelkit"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2024"
 rust-version = "1.88"
 description = "Tracing and telemetry initialization for Rust — OpenTelemetry, OTLP export, Sentry integration, and structured logging"
@@ -55,6 +55,20 @@ sentry = ["dep:sentry"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Wire tests: a real Sentry collector endpoint on loopback.
+wiremock = "0.6"
+
+[[test]]
+name = "wire_otlp"
+required-features = ["otlp"]
+
+[[test]]
+name = "wire_prometheus"
+required-features = ["prometheus"]
+
+[[test]]
+name = "wire_sentry"
+required-features = ["sentry"]
 
 [lints.clippy]
 unwrap_used = "deny"
