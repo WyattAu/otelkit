@@ -3,7 +3,24 @@
 All notable changes to this project are documented here. Format: [Keep a
 Changelog](https://keepachangelog.com/) — versions follow [semver](https://semver.org).
 
-## [2.0.2] - 2026-09-12
+## [Unreleased]
+
+## [2.0.3] - 2026-09-12
+
+### Added
+
+- `tests/config_matrix.rs` — per-knob behavior matrix for all 8 telemetry
+  knobs (gap fill: `OTEL_EXPORTER` env mapping was never asserted in
+  `tests/from_env.rs`; feature-off exporter rejections; repeatable
+  log-level rejection proving no global-state side effect).
+- `tests/wire_otlp.rs` now asserts the configured service name reaches the
+  OTLP wire bytes (was: shape tag only).
+
+### Fixed
+
+- `cargo clippy --no-default-features -D warnings`: `unused_mut` on the
+  `TelemetryGuard` binding when no backend feature is enabled
+  (pre-existing; `#[allow(unused_mut)]` with rationale comment).
 
 ### Added
 

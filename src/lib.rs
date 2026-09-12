@@ -199,6 +199,9 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
     let filter = tracing_subscriber::EnvFilter::try_new(&config.log_level)
         .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
 
+    // Every mutation of `guard` is feature-gated; with no backend
+    // features enabled the binding is never mutated.
+    #[allow(unused_mut)]
     let mut guard = TelemetryGuard {
         #[cfg(feature = "otlp")]
         tracer_provider: None,

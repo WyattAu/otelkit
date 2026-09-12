@@ -117,4 +117,12 @@ fn otlp_export_ships_protobuf_spans_to_the_receiver() {
         "suspiciously small export: {} bytes",
         body.len()
     );
+
+    // The configured service name must reach the wire inside the OTLP
+    // resource attributes (protobuf embeds the raw UTF-8 bytes).
+    let name = b"otelkit-wire-otlp";
+    assert!(
+        body.windows(name.len()).any(|w| w == name),
+        "export must carry the configured service name"
+    );
 }
