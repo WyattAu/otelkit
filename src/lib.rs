@@ -15,6 +15,23 @@ pub use config::{LogFormat, TelemetryConfig};
 pub use error::TelemetryError;
 pub use exporter::Exporter;
 
+/// Re-exported OpenTelemetry surface, so downstream crates can create
+/// spans, extract context, and read meter instruments without declaring
+/// (and accidentally version-skewing) their own `opentelemetry` pins.
+/// Available with any backend feature, since every feature depends on
+/// `dep:opentelemetry`.
+#[cfg(any(feature = "otlp", feature = "stdout", feature = "prometheus"))]
+pub mod otel {
+    pub use opentelemetry;
+    #[cfg(feature = "otlp")]
+    pub use opentelemetry_otlp;
+    #[cfg(feature = "prometheus")]
+    pub use opentelemetry_prometheus;
+    #[cfg(any(feature = "otlp", feature = "stdout"))]
+    pub use opentelemetry_sdk;
+    pub use tracing_opentelemetry;
+}
+
 /// RAII guard that flushes and shuts down telemetry on drop.
 pub struct TelemetryGuard {
     #[cfg(feature = "otlp")]
@@ -198,6 +215,16 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
 
     let filter = tracing_subscriber::EnvFilter::try_new(&config.log_level)
         .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
+
+    // W3C TraceContext propagator: without one, the global propagator is
+    // a no-op, `traceparent` extraction silently yields an empty context,
+    // and every inbound request starts an orphan root span.
+    #[cfg(feature = "otlp")]
+    {
+        use opentelemetry::global;
+        use opentelemetry_sdk::propagation::TraceContextPropagator;
+        global::set_text_map_propagator(TraceContextPropagator::new());
+    }
 
     // Every mutation of `guard` is feature-gated; with no backend
     // features enabled the binding is never mutated.
