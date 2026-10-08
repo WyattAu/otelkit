@@ -172,8 +172,15 @@ fn init_prometheus(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryE
         .with_registry(registry.clone())
         .build()
         .map_err(|e| TelemetryError::OtlpConnection(e.to_string()))?;
+    let resource = opentelemetry_sdk::Resource::builder()
+        .with_attributes([
+            opentelemetry::KeyValue::new("service.name", config.service_name.clone()),
+            opentelemetry::KeyValue::new("service.version", config.service_version.clone()),
+        ])
+        .build();
     let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
         .with_reader(exporter)
+        .with_resource(resource)
         .build();
     opentelemetry::global::set_meter_provider(meter_provider.clone());
 
@@ -334,8 +341,21 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
             .with_registry(registry.clone())
             .build()
             .map_err(|e| TelemetryError::OtlpConnection(e.to_string()))?;
+        // The meter resource carries service.name into every exported
+        // series as target_info; without it a scrape shows
+        // unknown_service:<exe> and the consumer cannot attribute metrics.
+        let resource = opentelemetry_sdk::Resource::builder()
+            .with_attributes([
+                opentelemetry::KeyValue::new("service.name", config.service_name.clone()),
+                opentelemetry::KeyValue::new(
+                    "service.version",
+                    config.service_version.clone(),
+                ),
+            ])
+            .build();
         let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
             .with_reader(exporter)
+            .with_resource(resource)
             .build();
         opentelemetry::global::set_meter_provider(meter_provider.clone());
         guard.meter_provider = Some(meter_provider);
