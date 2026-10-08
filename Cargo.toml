@@ -29,7 +29,7 @@ version = "0.32"
 optional = true
 
 [dependencies.opentelemetry-stdout]
-version = "0.32"
+version = "0.33"
 optional = true
 
 [dependencies.opentelemetry-prometheus]
