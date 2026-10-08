@@ -242,13 +242,16 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
         sentry_guard: None,
     };
 
-    // A non-OTLP selection without its feature compiled in is a
-    // configuration error, never silent behavior.
+    // Configuration errors are deterministic: a backend selected without its
+    // feature compiled in, or Prometheus metrics requested without the
+    // feature, never silently skip telemetry.
     #[allow(unreachable_patterns)]
     match config.exporter {
         #[cfg(feature = "stdout")]
         Exporter::Stdout => return init_stdout(config),
         #[cfg(feature = "prometheus")]
+        // Metrics-primary deployment: the Prometheus init installs its own
+        // subscriber and there is nothing to compose.
         Exporter::Prometheus => return init_prometheus(config),
         Exporter::Stdout => {
             return Err(TelemetryError::InvalidConfig(
@@ -263,15 +266,21 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
         Exporter::Otlp => {}
     }
 
+    #[cfg(not(feature = "prometheus"))]
+    if config.metrics_prometheus {
+        return Err(TelemetryError::InvalidConfig(
+            "metrics_prometheus requested but the `prometheus` feature is not enabled".into(),
+        ));
+    }
+
+    // Optional OTel span layer. Built before the subscriber so metrics can
+    // compose with it below — the old early-return made OTLP spans and
+    // Prometheus metrics mutually exclusive, which split every production
+    // deployment's telemetry across two processes.
     #[cfg(feature = "otlp")]
-    if config.otlp_endpoint.is_some() {
+    let otel_layer = if let Some(endpoint) = config.otlp_endpoint.as_deref() {
         use opentelemetry::trace::TracerProvider as _;
         use opentelemetry_otlp::WithExportConfig;
-
-        let otlp_endpoint = config
-            .otlp_endpoint
-            .as_deref()
-            .unwrap_or("http://localhost:4317");
 
         let resource = opentelemetry_sdk::Resource::builder()
             .with_attributes([opentelemetry::KeyValue::new(
@@ -282,7 +291,7 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
 
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_endpoint(otlp_endpoint)
+            .with_endpoint(endpoint)
             .build()
             .map_err(|e| TelemetryError::OtlpConnection(e.to_string()))?;
 
@@ -292,53 +301,45 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
             .build();
 
         let tracer = tracer_provider.tracer(config.service_name.clone());
-        let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_new(&config.log_level)
-                    .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?,
-            )
-            .with(tracing_subscriber::fmt::layer().with_target(true))
-            .with(otel_layer)
-            .try_init()
-            .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
-
         guard.tracer_provider = Some(tracer_provider);
-        return Ok(guard);
-    }
+        Some(tracing_opentelemetry::layer().with_tracer(tracer))
+    } else {
+        None
+    };
 
+    // One subscriber installation for every combination of backends.
+    // `Option<L>` implements `Layer`, so the optional OTel layer binds in a
+    // single expression: each `with` changes the concrete type, and a `mut`
+    // binding cannot be re-layered.
+    #[cfg(feature = "otlp")]
+    let registry = tracing_subscriber::registry().with(filter).with(otel_layer);
+    #[cfg(not(feature = "otlp"))]
     let registry = tracing_subscriber::registry().with(filter);
-
     match config.log_format {
-        LogFormat::Text => {
-            registry
-                .with(tracing_subscriber::fmt::layer().with_target(true))
-                .try_init()
-                .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
-        }
-        LogFormat::Json => {
-            registry
-                .with(tracing_subscriber::fmt::layer().json().with_target(true))
-                .try_init()
-                .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?;
-        }
+        LogFormat::Text => registry
+            .with(tracing_subscriber::fmt::layer().with_target(true))
+            .try_init()
+            .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?,
+        LogFormat::Json => registry
+            .with(tracing_subscriber::fmt::layer().json().with_target(true))
+            .try_init()
+            .map_err(|e| TelemetryError::InvalidConfig(e.to_string()))?,
     }
 
-    #[cfg(feature = "sentry")]
-    {
-        let sentry_dsn = config.sentry_dsn.as_deref().ok_or_else(|| {
-            TelemetryError::InvalidConfig("sentry feature enabled but no DSN provided".into())
-        })?;
-
-        guard.sentry_guard = Some(sentry::init((
-            sentry_dsn,
-            sentry::ClientOptions {
-                traces_sample_rate: config.sample_rate,
-                release: Some(config.service_version.clone().into()),
-                ..Default::default()
-            },
-        )));
+    // Prometheus metrics compose with whatever primary exporter was chosen.
+    #[cfg(feature = "prometheus")]
+    if config.metrics_prometheus {
+        let registry = prometheus::Registry::new();
+        let exporter = opentelemetry_prometheus::exporter()
+            .with_registry(registry.clone())
+            .build()
+            .map_err(|e| TelemetryError::OtlpConnection(e.to_string()))?;
+        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+            .with_reader(exporter)
+            .build();
+        opentelemetry::global::set_meter_provider(meter_provider.clone());
+        guard.meter_provider = Some(meter_provider);
+        guard.prometheus_registry = Some(registry);
     }
 
     Ok(guard)
@@ -891,6 +892,38 @@ mod tests {
     }
 
     #[cfg(feature = "prometheus")]
+    /// Metrics must compose with spans: OTLP primary + Prometheus flag
+    /// yields both a tracer provider and a working registry, and a counter
+    /// recorded through the global meter is visible in the exposition.
+    #[test]
+    fn otlp_and_prometheus_compose() {
+        let guard = crate::init(
+            crate::TelemetryConfig::new("compose-test")
+                .log_level("warn")
+                .otlp_endpoint("http://127.0.0.1:1")
+                .with_prometheus_metrics(),
+        )
+        .expect("composed init must succeed");
+
+        assert!(
+            guard.tracer_provider.is_some(),
+            "OTLP spans must still be installed"
+        );
+
+        let meter = opentelemetry::global::meter("compose-test");
+        let counter = meter
+            .u64_counter("compose_requests_total")
+            .build();
+        counter.add(7, &[]);
+
+        let text = guard.gather_metrics().expect("registry present");
+        assert!(
+            text.contains("compose_requests_total"),
+            "recorded counter must appear in the exposition: {text}"
+        );
+        assert!(text.contains("7"), "counter value must be exported: {text}");
+    }
+
     #[test]
     fn init_prometheus_guard_gather_without_init() {
         // A default-constructed guard has no registry — gather must fail

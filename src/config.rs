@@ -42,6 +42,16 @@ pub struct TelemetryConfig {
     /// Defaults to [`Exporter::Otlp`], which preserves the historical
     /// behavior. Added in 2.0.0.
     pub exporter: Exporter,
+    /// Additionally install a Prometheus meter provider, so metrics compose
+    /// with the primary exporter.
+    ///
+    /// Traces and metrics want different backends in practice — OTLP spans
+    /// to a collector, Prometheus scrape for metrics — and a single
+    /// `exporter` forced an early return that made the pair impossible.
+    /// Requires the `prometheus` feature; with the flag set and the feature
+    /// absent, [`otelkit::init`](crate::init) fails with a configuration
+    /// error rather than silently skipping metrics. Added in 2.2.0.
+    pub metrics_prometheus: bool,
 }
 
 impl Default for TelemetryConfig {
@@ -55,6 +65,7 @@ impl Default for TelemetryConfig {
             sentry_dsn: None,
             sample_rate: 1.0,
             exporter: Exporter::default(),
+            metrics_prometheus: false,
         }
     }
 }
@@ -79,6 +90,9 @@ impl TelemetryConfig {
             exporter: Exporter::from_str_opt(
                 &std::env::var("OTEL_EXPORTER").unwrap_or_else(|_| "otlp".into()),
             ),
+            metrics_prometheus: std::env::var("OTEL_METRICS_PROMETHEUS")
+                .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false),
         })
     }
 
@@ -96,6 +110,12 @@ impl TelemetryConfig {
     /// Set the service version.
     pub fn service_version(mut self, version: impl Into<String>) -> Self {
         self.service_version = version.into();
+        self
+    }
+
+    /// Additionally install a Prometheus meter provider.
+    pub fn with_prometheus_metrics(mut self) -> Self {
+        self.metrics_prometheus = true;
         self
     }
 
