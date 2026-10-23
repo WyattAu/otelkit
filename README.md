@@ -1,4 +1,5 @@
 # otelkit
+[![Estate integration](https://github.com/WyattAu/estate-integration/actions/workflows/ci.yml/badge.svg)](https://github.com/WyattAu/estate-integration/actions/workflows/ci.yml)
 
 [![docs.rs](https://docs.rs/otelkit/badge.svg)](https://docs.rs/otelkit)
 [![crates.io](https://img.shields.io/crates/v/otelkit.svg)](https://crates.io/crates/otelkit)
