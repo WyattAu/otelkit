@@ -1,9 +1,9 @@
 [package]
 name = "otelkit"
-version = "2.2.1"
+version = "2.2.3"
 edition = "2024"
 rust-version = "1.88"
-description = "Tracing and telemetry initialization for Rust — OpenTelemetry, OTLP export, Sentry integration, and structured logging"
+description = "Tracing and telemetry initialization for Rust: OpenTelemetry, OTLP export, Sentry integration, and structured logging"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/WyattAu/otelkit"
 keywords = ["tracing", "opentelemetry", "telemetry", "logging", "sentry"]
