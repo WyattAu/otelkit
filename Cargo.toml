@@ -1,6 +1,6 @@
 [package]
 name = "otelkit"
-version = "2.2.3"
+version = "3.0.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Tracing and telemetry initialization for Rust: OpenTelemetry, OTLP export, Sentry integration, and structured logging"
@@ -41,7 +41,7 @@ version = "0.14"
 optional = true
 
 [dependencies.sentry]
-version = "0.34"
+version = "0.37"
 optional = true
 
 [features]
