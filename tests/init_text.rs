@@ -35,19 +35,29 @@ fn text_format_init_lifecycle() {
         "got: {err}"
     );
 
-    // 2. Text format without a Sentry DSN.
+    // 2. Text format without a Sentry DSN and without an OTLP endpoint:
+    //    refused BEFORE any global state is touched (v3.0.1: the validation
+    //    moved ahead of subscriber installation, so the process can still
+    //    init cleanly afterwards with a valid config).
     #[cfg(feature = "sentry")]
     {
-        // With the sentry feature compiled in, a missing DSN is a config
-        // error — but note the subscriber is already installed at that
-        // point, so the rest of this process can never init successfully.
         let err = init_err(TelemetryConfig::default().log_format(LogFormat::Text));
         assert!(
             matches!(&err, TelemetryError::InvalidConfig(msg) if msg.contains("DSN")),
             "got: {err}"
         );
 
-        // 3. Any further init fails because the global subscriber is taken.
+        // 3. With a DSN set, init succeeds: the guard is created and the
+        //    global subscriber is now taken.
+        let guard = otelkit::init(
+            TelemetryConfig::default()
+                .log_format(LogFormat::Text)
+                .sentry_dsn("https://key@sentry.io/1"),
+        )
+        .expect("valid config must init");
+        drop(guard);
+
+        // 4. Any further init fails because the global subscriber is taken.
         let err = init_err(
             TelemetryConfig::default()
                 .log_format(LogFormat::Text)
@@ -61,22 +71,27 @@ fn text_format_init_lifecycle() {
 
     #[cfg(not(feature = "sentry"))]
     {
-        // Without the sentry feature the same config initializes cleanly.
-        let guard = match otelkit::init(
+        // Without the sentry feature there is no export mechanism compiled
+        // at all: a pathless config is refused (silent no-op telemetry),
+        // with a DSN present but the feature off the refusal is the same.
+        let err = init_err(
             TelemetryConfig::default()
                 .log_format(LogFormat::Text)
                 .log_level("info"),
-        ) {
-            Ok(g) => g,
-            Err(e) => panic!("text init should succeed: {e}"),
-        };
-        drop(guard);
+        );
+        assert!(
+            matches!(&err, TelemetryError::InvalidConfig(msg)
+                if msg.contains("no export path")),
+            "got: {err}"
+        );
 
-        // A second init in the same process must fail: the global
-        // subscriber is already installed.
+        // A second init in the same process fails the same way (the
+        // export-path check runs before the subscriber is touched, so the
+        // refusal is deterministic rather than subscriber-order-dependent).
         let err = init_err(TelemetryConfig::default().log_format(LogFormat::Text));
         assert!(
-            matches!(err, TelemetryError::InvalidConfig(_)),
+            matches!(&err, TelemetryError::InvalidConfig(msg)
+                if msg.contains("no export path")),
             "got: {err}"
         );
     }

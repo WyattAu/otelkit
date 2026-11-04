@@ -1,6 +1,9 @@
 // Json-format init success path + guard drop (separate process from
 // init_text.rs because tracing allows one successful global init per
-// process). unwrap/expect are the test signal here.
+// process). The config is Sentry-DSN-shaped, so the file requires the
+// sentry feature: without it the DSN is not an export path and init is
+// correctly refused. unwrap/expect are the test signal here.
+#![cfg(feature = "sentry")]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

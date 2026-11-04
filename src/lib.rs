@@ -273,6 +273,29 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
         Exporter::Otlp => {}
     }
 
+    // A config that selects no export path is a silent no-op: the guard
+    // would install a subscriber whose records go nowhere, which is a gate
+    // that lies. Require at least one configured sink (OTLP endpoint or a
+    // Sentry DSN). Found by `init_sentry_errors` under the 0.37 bump: the
+    // check the test demanded had never been implemented.
+    {
+        #[cfg(feature = "otlp")]
+        let has_otlp_path = config.otlp_endpoint.is_some();
+        #[cfg(not(feature = "otlp"))]
+        let has_otlp_path = false;
+        #[cfg(feature = "sentry")]
+        let has_sentry_path = config.sentry_dsn.is_some();
+        #[cfg(not(feature = "sentry"))]
+        let has_sentry_path = false;
+        if !has_otlp_path && !has_sentry_path {
+            return Err(TelemetryError::InvalidConfig(
+                "no export path configured: set otlp_endpoint or the Sentry DSN \
+                 (sentry_dsn); silent no-op telemetry is refused"
+                    .into(),
+            ));
+        }
+    }
+
     #[cfg(not(feature = "prometheus"))]
     if config.metrics_prometheus {
         return Err(TelemetryError::InvalidConfig(
@@ -360,6 +383,23 @@ pub fn init(config: TelemetryConfig) -> Result<TelemetryGuard, TelemetryError> {
         opentelemetry::global::set_meter_provider(meter_provider.clone());
         guard.meter_provider = Some(meter_provider);
         guard.prometheus_registry = Some(registry);
+    }
+
+    // Sentry: a configured DSN binds a client to the current hub, carrying
+    // the release and sample rate through ClientOptions. Before 3.0.1 this
+    // block did not exist: the feature held a permanently-None guard, so
+    // "sentry support" was a silent no-op.
+    #[cfg(feature = "sentry")]
+    if let Some(dsn) = config.sentry_dsn.as_deref() {
+        let mut options = sentry::ClientOptions::new();
+        options.dsn = Some(dsn.parse().map_err(
+            |e: sentry::types::ParseDsnError| {
+                TelemetryError::InvalidConfig(format!("sentry dsn: {e}"))
+            },
+        )?);
+        options.release = Some(config.service_version.clone().into());
+        options.traces_sample_rate = config.sample_rate;
+        guard.sentry_guard = Some(sentry::init(options));
     }
 
     Ok(guard)
@@ -953,12 +993,17 @@ mod tests {
             tracer_provider: None,
             #[cfg(feature = "stdout")]
             stdout_provider: None,
+            #[cfg(feature = "prometheus")]
             meter_provider: None,
+            #[cfg(feature = "prometheus")]
             prometheus_registry: None,
             #[cfg(feature = "sentry")]
             sentry_guard: None,
         };
-        let result = guard.gather_metrics();
-        assert!(result.is_err());
+        #[cfg(feature = "prometheus")]
+        {
+            let result = guard.gather_metrics();
+            assert!(result.is_err());
+        }
     }
 }
